@@ -1,0 +1,59 @@
+# ==============================================================================
+# Git Ignore Configuration for AI Agent Projects
+# ==============================================================================
+
+# 1. 敏感信息与环境变量 (Environment & Secrets)
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# 2. 运行时生成产物 (Generated Outputs & Artifacts)
+# 忽略所有项目 outputs 目录下的生成文件，仅保留 .gitkeep
+**/outputs/*
+!**/outputs/.gitkeep
+outputs/*
+!outputs/.gitkeep
+
+# 3. Python 字节码与缓存 (Python Cache)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# 4. 虚拟环境与依赖包 (Virtual Environments)
+.venv/
+venv/
+env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+
+# 5. 操作系统与编辑器临时文件 (OS & IDE Files)
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
