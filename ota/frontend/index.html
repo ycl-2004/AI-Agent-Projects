@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OTA · 智能工单质检与分派中台</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="#" id="brandHome">OTA<span class="brand-sep">·</span><span class="brand-sub">TICKET AGENT CONSOLE</span></a>
+  <div class="topbar-meta mono">LangChain LCEL · Tool Calling · Pydantic v2</div>
+</header>
+
+<main id="app">
+
+  <!-- ================= VIEW 1 · HOME ================= -->
+  <section id="view-home" class="view view-active">
+    <div class="hero">
+      <p class="eyebrow mono">OMNI-CHANNEL TICKET AGENT</p>
+      <h1 class="hero-title">一张客诉工单，<br>一份可审计的处置方案</h1>
+      <p class="hero-sub">两阶段工具调度 × 结构化质检：识别意图、核算赔付、感知情绪与紧急度，秒级输出核准结果与可直达客户的官方回复草稿。</p>
+
+      <div class="mode-tabs" role="tablist">
+        <button class="mode-tab is-active" data-mode="single" role="tab">单单质检<span class="mode-en mono">invoke</span></button>
+        <button class="mode-tab" data-mode="batch" role="tab">并发批处理<span class="mode-en mono">batch</span></button>
+        <button class="mode-tab" data-mode="stream" role="tab">流式回复<span class="mode-en mono">stream</span></button>
+      </div>
+
+      <!-- 单工单表单 -->
+      <div class="panel" id="formSingle">
+        <textarea id="ticketText" rows="3" maxlength="1000" placeholder="粘贴或输入客户工单原文…">我的订单 ord_1001 已经延误了 36 个小时还没送到！我是 SVIP 会员，你们必须立刻赔偿并告诉我包裹在哪里！</textarea>
+        <div class="chips">
+          <button class="chip" data-text="我的订单 ord_1001 已经延误了 36 个小时还没送到！我是 SVIP 会员，你们必须立刻赔偿并告诉我包裹在哪里！" data-user="user_svip_99" data-order="ord_1001" data-amount="1200" data-delay="36">SVIP · 延误 36h 索赔</button>
+          <button class="chip" data-text="买的音响包装严重破损，里面零件都掉出来了，要求换货！" data-user="user_normal_01" data-order="ord_1002" data-amount="300" data-delay="0">商品破损换货</button>
+          <button class="chip" data-text="你们这什么破服务？扣了我两次款还没退！再不处理我直接投诉 12315！" data-user="user_svip_99" data-order="ord_1003" data-amount="1500" data-delay="0">重复扣款 · 投诉威胁</button>
+        </div>
+        <div class="field-grid">
+          <label class="field">
+            <span class="field-label">用户 ID<em class="vip-badge mono" id="vipBadge">SVIP</em></span>
+            <input id="userId" type="text" value="user_svip_99" autocomplete="off">
+          </label>
+          <label class="field">
+            <span class="field-label">订单号</span>
+            <input id="orderId" type="text" value="ord_1001" autocomplete="off">
+          </label>
+          <label class="field">
+            <span class="field-label">订单金额 (元)</span>
+            <input id="orderAmount" type="number" min="0" step="0.01" value="1200">
+          </label>
+          <label class="field">
+            <span class="field-label">延误时长 (小时)</span>
+            <input id="delayHours" type="number" min="0" step="1" value="36">
+          </label>
+        </div>
+        <div class="panel-actions">
+          <p class="form-hint" id="formHint" role="alert"></p>
+          <button id="singleBtn" class="btn btn-primary">开始质检</button>
+        </div>
+      </div>
+
+      <!-- 批处理表单 -->
+      <div class="panel hidden" id="formBatch">
+        <p class="panel-note">晨间积压场景：最多 5 张工单线程池并发质检（预置 3 张典型客诉，文本可直接编辑）。</p>
+        <div id="batchList"></div>
+        <div class="panel-actions">
+          <p class="form-hint" id="batchHint" role="alert"></p>
+          <button id="batchBtn" class="btn btn-primary">并发处理积压工单</button>
+        </div>
+      </div>
+
+      <!-- 流式表单 -->
+      <div class="panel hidden" id="formStream">
+        <textarea id="streamText" rows="3" maxlength="1000" placeholder="输入坐席当前接待的客户消息…">购买的商品迟迟不发货，客服一直推诿，非常失望！</textarea>
+        <div class="field-grid">
+          <label class="field">
+            <span class="field-label">用户 ID</span>
+            <input id="streamUserId" type="text" value="user_vip_88" autocomplete="off">
+          </label>
+        </div>
+        <div class="panel-actions">
+          <p class="form-hint" id="streamHint" role="alert"></p>
+          <button id="streamBtn" class="btn btn-primary">生成官方回复草稿</button>
+        </div>
+      </div>
+
+      <button id="resumePill" class="resume-pill mono hidden">继续进行中的会话 →</button>
+    </div>
+
+    <section class="pipeline-map">
+      <div class="pm-head">
+        <h2 class="pm-title">质检流水线</h2>
+        <span class="pm-note mono">RunnableParallel · bind_tools · with_structured_output</span>
+      </div>
+      <ol class="pm-steps">
+        <li><span class="pm-idx mono">01</span><span class="pm-name">预处理传送带</span><span class="pm-desc">会员等级 · 上下文补齐</span></li>
+        <li><span class="pm-idx mono">02</span><span class="pm-name">意图识别</span><span class="pm-desc">情绪与紧急度感知</span></li>
+        <li><span class="pm-idx mono">03</span><span class="pm-name">工具调度</span><span class="pm-desc">赔付 · 物流 · 升级 · 催派</span></li>
+        <li><span class="pm-idx mono">04</span><span class="pm-name">结构化质检</span><span class="pm-desc">Pydantic 约束 · 自愈重试</span></li>
+        <li><span class="pm-idx mono">05</span><span class="pm-name">处置报告</span><span class="pm-desc">核准赔付 · 官方回复草稿</span></li>
+      </ol>
+    </section>
+
+    <footer class="home-footer mono">invoke · batch · stream — 三种模式共享同一条 LCEL 流水线</footer>
+  </section>
+
+  <!-- ================= VIEW 2 · RUN (single + batch) ================= -->
+  <section id="view-run" class="view">
+    <div class="run-header">
+      <button id="backBtn" class="btn btn-ghost btn-sm">← 新的工单</button>
+      <h2 class="run-topic" id="runTopic"></h2>
+      <span class="status-badge" id="runStatus"><span class="status-dot"></span><span class="status-text">排队中</span></span>
+    </div>
+
+    <div id="singleRun">
+      <div class="stepper" id="stepper"></div>
+      <div class="run-body">
+        <div class="feed-col">
+          <div class="feed" id="feed"></div>
+        </div>
+        <aside class="meta-col">
+          <div class="meta-card mono">
+            <div class="meta-row"><span class="meta-label">SESSION</span><span id="metaSession">—</span></div>
+            <div class="meta-row"><span class="meta-label">会员等级</span><span id="metaVip">—</span></div>
+            <div class="meta-row"><span class="meta-label">订单号</span><span id="metaOrder">—</span></div>
+            <div class="meta-row"><span class="meta-label">订单金额</span><span id="metaAmount">—</span></div>
+            <div class="meta-row"><span class="meta-label">延误时长</span><span id="metaDelay">—</span></div>
+            <div class="meta-row"><span class="meta-label">工具调用</span><span id="metaTools">0 次</span></div>
+            <div class="meta-row"><span class="meta-label">抽取尝试</span><span id="metaAttempts">0 次</span></div>
+            <div class="meta-row"><span class="meta-label">已用时</span><span id="metaElapsed">00:00</span></div>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <div id="batchRun" class="hidden">
+      <div class="batch-stats mono" id="batchStats"></div>
+      <div class="lanes" id="lanes"></div>
+    </div>
+  </section>
+
+  <!-- ================= VIEW 3 · STREAM ================= -->
+  <section id="view-stream" class="view">
+    <div class="stream-wrap">
+      <div class="run-header">
+        <button id="streamBackBtn" class="btn btn-ghost btn-sm">← 新的工单</button>
+        <h2 class="run-topic">坐席端实时回复</h2>
+        <span class="status-badge" id="streamStatus"><span class="status-dot"></span><span class="status-text">准备中</span></span>
+      </div>
+      <div class="chat">
+        <div class="bubble bubble-customer" id="customerBubble"></div>
+        <div class="bubble bubble-agent">
+          <div class="bubble-agent-label mono">OFFICIAL REPLY DRAFT</div>
+          <div class="agent-text serif" id="agentText"><span id="agentBody"></span><span class="caret"></span></div>
+        </div>
+      </div>
+      <div class="stream-actions hidden" id="streamActions">
+        <button id="copyStreamBtn" class="btn btn-secondary btn-sm">复制回复</button>
+        <button id="streamNewBtn" class="btn btn-primary btn-sm">新的工单</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= VIEW 4 · REPORT ================= -->
+  <section id="view-report" class="view">
+    <div class="report-wrap">
+      <div class="report-header">
+        <p class="report-eyebrow mono">QUALITY INSPECTION REPORT</p>
+        <h2 class="report-title" id="reportSummary"></h2>
+        <p class="report-meta mono" id="reportMeta"></p>
+      </div>
+      <div class="tiles" id="tiles"></div>
+      <div class="reply-doc">
+        <div class="reply-doc-head">
+          <p class="reply-eyebrow mono">OFFICIAL REPLY DRAFT</p>
+          <button id="copyReplyBtn" class="btn btn-secondary btn-sm">复制草稿</button>
+        </div>
+        <div class="reply-body serif" id="replyBody"></div>
+      </div>
+      <div class="report-actions">
+        <button id="reportNewBtn" class="btn btn-primary btn-sm">处理新的工单</button>
+      </div>
+    </div>
+  </section>
+
+</main>
+</body>
+</html>

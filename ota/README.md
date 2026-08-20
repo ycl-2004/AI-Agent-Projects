@@ -5,6 +5,7 @@
 [![LangChain](https://img.shields.io/badge/Framework-LangChain%20LCEL-green.svg)](https://github.com/langchain-ai/langchain)
 [![Pydantic v2](https://img.shields.io/badge/Validation-Pydantic%20v2-red.svg)](https://docs.pydantic.dev/)
 [![Execution](https://img.shields.io/badge/Execution-invoke%20%7C%20batch%20%7C%20stream-purple.svg)]()
+[![Frontend](https://img.shields.io/badge/Frontend-Starlette%20%2B%20SSE-3056D3.svg)]()
 
 ---
 
@@ -18,6 +19,7 @@
 - **工具调用闭环**：模型根据工单意图选择赔付核算、物流状态、人工升级或特急催派工具，再通过 `ToolMessage` 回传结果。
 - **结构化质检与自愈**：使用 Pydantic `TicketResolution` 约束情绪、紧急度、问题分类、赔付金额和官方回复；校验失败时自动修复并重试。
 - **三种终端运行模式**：`invoke` 单单处理、`batch` 并发批处理、`stream` 回复草稿流式输出，三种模式均支持终端输入，直接回车可使用默认样例。
+- **浏览器 Web UI**：提供基于 Starlette + SSE 的单页前端，实时展示流水线事件、工具调用、结构化抽取与最终处置结果；无需 npm 或 Node.js。
 
 OTA 的物流与升级工具目前是本地确定性业务工具，用于演示业务规则和工具调用闭环；项目没有接入真实物流供应商 API。模型调用仍通过 `.env` 中配置的 OpenAI-compatible 接口完成。
 
@@ -70,6 +72,7 @@ OTA 的物流与升级工具目前是本地确定性业务工具，用于演示�
 | **`tools.py`** | 提供确定性的业务工具函数 | `@tool`、赔付规则、物流状态、升级与催派动作 |
 | **`pipeline.py`** | 组装 LCEL 链、工具调度和结构化自愈流程 | `RunnableParallel`、`bind_tools`、`ToolMessage`、`with_structured_output` |
 | **`main.py`** | 提供与 DRS 类似的终端交互入口 | 模式选择、字段输入、默认值、结果展示 |
+| **`frontend/server.py`** | 提供浏览器入口、后台任务与 SSE 事件流 | Starlette、后台线程、`/api/start`、`/api/events/{sid}` |
 | **`tests/test_pipeline.py`** | 验证单单、批处理与流式接口 | TicketResolution 断言、批量数量断言、stream chunk 断言 |
 
 ---
@@ -131,6 +134,12 @@ projects/ota/
 ├── pipeline.py             # LCEL 预处理、工具调用、结构化抽取与 batch/stream 接口
 ├── schemas.py              # TicketInput 与 TicketResolution Pydantic 契约
 ├── tools.py                # 4 个本地确定性业务工具及工具映射
+├── frontend/
+│   ├── server.py            # Starlette 后端、后台任务与 SSE 事件流
+│   ├── index.html           # Web UI 单页入口
+│   ├── static/app.js        # 三种模式的交互与事件回放
+│   ├── static/style.css     # 运营指挥台视觉样式
+│   └── README.md            # 前端单独运行说明与 API 速查
 └── tests/
     └── test_pipeline.py    # 三种运行模式的自动化回归测试
 ```
@@ -141,15 +150,17 @@ projects/ota/
 
 ### 1. 环境准备
 
-确保已安装 Python 3.10+，在仓库根目录创建并配置 `.env`：
+确保已安装 Python 3.10+，进入 OTA 项目目录创建并配置 `.env`：
 
 ```bash
-cd projects
+cd projects/ota
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install langchain langchain-openai pydantic python-dotenv pytest
-cp .env.example .env
+pip install langchain langchain-openai pydantic python-dotenv pytest starlette uvicorn
+cp ../.env.example .env
 ```
+
+`pipeline.py` 会优先读取 `ota/.env`，也兼容从仓库根目录配置 `.env`；因此从 CLI 或前端启动时使用的是同一套模型配置。
 
 编辑 `.env`，填入 OpenAI-compatible 模型配置：
 
@@ -164,7 +175,7 @@ ZAI_API_KEY=your_api_key_here
 与 DRS 的终端体验一致：启动后先选择运行模式，再按提示输入工单信息；所有问题直接按回车都可以使用默认值。
 
 ```bash
-python ota/main.py
+python main.py
 ```
 
 启动后：
@@ -217,14 +228,46 @@ python ota/main.py
 🖥️ 客服回复实时流式生成: 您好，非常抱歉给您带来不好的体验……
 ```
 
-### 3. 自动化验证
+### 3. Web UI 运行（浏览器）
+
+OTA 前端与 DRS 采用同样的 Starlette + SSE 运行方式，复用同一套 `pipeline.py`，不另起业务逻辑。另开一个终端，在 `ota/` 目录启动服务：
+
+```bash
+cd projects/ota
+source .venv/bin/activate
+python frontend/server.py
+```
+
+看到服务启动后，用浏览器打开：
+
+```text
+http://127.0.0.1:8789
+```
+
+也可以先检查服务健康状态：
+
+```bash
+curl http://127.0.0.1:8789/api/health
+# {"ok":true,"sessions":0}
+```
+
+浏览器中的完整操作流程是：
+
+1. 在首页选择 `invoke`、`batch` 或 `stream`，填写工单字段或直接使用默认样例；
+2. 点击开始按钮，前端通过 `POST /api/start` 创建后台会话；
+3. 通过 `GET /api/events/{session_id}` 的 SSE 实时查看预处理、工具调用、质检抽取和自愈重试事件；
+4. 单工单与批处理完成后查看结构化处置报告，流式模式则查看官方回复草稿的逐字输出。
+
+前端是纯静态 HTML/CSS/JS，无需 npm 或 Node.js；服务默认监听 `127.0.0.1:8789`，CLI 和 Web UI 共用相同的 LCEL pipeline、业务工具与环境变量。
+
+### 4. 自动化验证
 
 测试会调用配置的模型接口，因此需要先完成 `.env` 配置，并可能产生模型调用费用：
 
 ```bash
-python ota/tests/test_pipeline.py
+python tests/test_pipeline.py
 # 或
-pytest ota/tests/test_pipeline.py -q
+pytest tests/test_pipeline.py -q
 ```
 
 ---

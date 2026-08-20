@@ -16,9 +16,14 @@ from schemas import TicketInput, TicketResolution
 import os
 from datetime import datetime
 
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPOSITORY_DIR = os.path.dirname(PROJECT_DIR)
+
+# 优先使用 ota/.env，再回退到仓库根目录；最后兼容从其他目录启动时的当前目录配置。
+load_dotenv(os.path.join(PROJECT_DIR, ".env"))
+load_dotenv(os.path.join(REPOSITORY_DIR, ".env"))
+load_dotenv(os.path.join(REPOSITORY_DIR, "..", ".env"))
 load_dotenv()
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", "recipes", ".env"))
 
 model = ChatOpenAI(
     api_key=os.getenv("ZAI_API_KEY") or os.getenv("OPENAI_API_KEY"),
