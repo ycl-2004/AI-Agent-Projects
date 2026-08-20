@@ -5,6 +5,7 @@
 [![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph-orange.svg)](https://github.com/langchain-ai/langgraph)
 [![LangChain](https://img.shields.io/badge/Framework-LangChain-green.svg)](https://github.com/langchain-ai/langchain)
 [![Data Source](https://img.shields.io/badge/Data%20Source-100%25%20Real%20APIs-brightgreen.svg)]()
+[![Frontend](https://img.shields.io/badge/Frontend-Starlette%20%2B%20SSE-1D6A50.svg)]()
 
 ---
 
@@ -15,7 +16,7 @@
 **DRS (Deep Research & Report System)** 采用 **“编辑部流水线 (Editorial Pipeline)”** 架构理念，基于 **LangGraph 状态机** 构建。系统将人类专家团队的研究模式转化为严密协同的 Multi-Agent 图拓扑：
 - **规划拆解 ──► 100% 真实多源检索 ──► 事实质检与反思自愈 ──► 人机协同大纲终审 (HITL) ──► 深度研报撰写 ──► 实体文件持久化落盘**。
 
-整个系统完全摒弃假数据（Mock），直接打通 **arXiv 学术预印本官方 API**、**Wikipedia 百科官方知识库** 与 **实时互联网搜索引擎**，生成具备工业级参考价值的 3000+ 字技术调研报告。
+整个系统完全摒弃假数据（Mock），直接打通 **arXiv 学术预印本官方 API**、**Wikipedia 百科官方知识库** 与 **实时互联网搜索引擎**，生成具备工业级参考价值的 3000+ 字技术调研报告。除 CLI 外，项目还提供一个基于 **Starlette + SSE** 的 Web UI：可以实时查看检索进度、在浏览器完成大纲 HITL 审阅，并在线阅读或下载最终研报。
 
 ---
 
@@ -145,19 +146,46 @@ class ResearchState(TypedDict):
 
 ---
 
+## 🖥️ Web UI 与前端架构 (Frontend)
+
+DRS 前端复用同一个 `graph.py` LangGraph 应用，不另起一套业务逻辑：
+
+```text
+浏览器主题输入
+      │ POST /api/start
+      ▼
+frontend/server.py ── 后台线程 ──► graph_app.invoke(initial_state)
+      ▲                                  │
+      │ GET /api/events/{sid}              │ progress 事件总线 + MemorySaver
+      │ SSE 实时事件                       ▼
+      └────────────── 浏览器步进器 / 事实流 / HITL 大纲审阅
+                         │ POST /api/review
+                         └── Command(resume=...) 恢复同一调研会话
+```
+
+前端包含三个主要视图：**主题输入** → **调研流水线**（六步进度、事件流、HITL 审阅）→ **研报阅读**（逐字呈现、下载与复制）。前端是纯静态 HTML/CSS/JS，`marked.js` 已本地 vendor，无需 npm 或 Node.js。
+
+---
+
 ## 🚀 快速开始与真机体验 (Quick Start)
 
 ### 1. 环境准备
-确保已安装 Python 3.10+，并在项目根目录配置 `.env` 文件：
+确保已安装 Python 3.10+，并在 DRS 项目目录配置 `.env` 文件：
 ```bash
+# 进入 DRS 项目目录
+cd projects/drs
+
 # 激活虚拟环境
 conda activate LC
 
 # 安装依赖
-pip install langgraph langchain langchain-openai ddgs wikipedia arxiv python-dotenv
+pip install langgraph langchain langchain-openai ddgs wikipedia arxiv python-dotenv starlette uvicorn
+
+# 使用 DRS 自己的环境变量模板
+cp .env.example .env
 ```
 
-在根目录 `.env` 中配置你的模型与 API 密钥：
+在 `projects/drs/.env` 中配置你的模型与 API 密钥：
 ```env
 MODEL=gpt-4o
 BASE_URL=https://api.openai.com/v1
@@ -166,7 +194,10 @@ ZAI_API_KEY=your_api_key_here
 
 ### 2. 启动运行
 
-#### 方式 A：交互式运行（支持自定义主题或直接回车使用默认值）
+#### 方式 A：CLI 交互式运行（终端）
+
+CLI 适合快速验证完整链路。启动后输入调研主题；流程到达 Reviewer 节点时，再输入自然语言审核意见：
+
 ```bash
 cd projects/drs
 python main.py
@@ -180,10 +211,38 @@ python main.py
 > 2026 年具身智能多模态大模型落地现状与挑战
 ```
 
-#### 方式 B：命令行快捷运行（直接指定调研主题）
+如果不想交互输入主题，也可以直接传入命令行参数：
+
 ```bash
 python main.py "英伟达 Blackwell 架构与 NVLink 5 互联技术深度分析"
 ```
+
+#### 方式 B：Web UI 运行（浏览器）
+
+Web UI 适合观察实时进度和完成可视化 HITL 审阅。另开一个终端，在 `drs/` 目录启动 Starlette 服务：
+
+```bash
+cd projects/drs
+python frontend/server.py
+```
+
+看到以下地址后，用浏览器打开：
+
+```text
+============================================================
+  DRS Frontend Server
+  ->  http://127.0.0.1:8788
+============================================================
+```
+
+浏览器中的完整操作流程是：
+
+1. 在首页输入调研主题，点击「开始调研」；
+2. 在流水线页面实时查看 Planner、Research、Evaluator 等节点和检索工具事件；
+3. 系统到达 `reviewer` 后显示研报大纲，点击「通过」或填写意见后选择「按意见修订大纲」；
+4. 等待 Writer 与 Exporter 完成，在研报阅读页查看正文、下载 `.md` 或复制全文。
+
+前端服务默认监听 `127.0.0.1:8788`，健康检查地址为 `http://127.0.0.1:8788/api/health`。CLI 和 Web UI 共用同一套 LangGraph、状态契约、工具和 `outputs/` 落盘逻辑。
 
 ---
 

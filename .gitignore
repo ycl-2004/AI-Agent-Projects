@@ -15,6 +15,9 @@
 !**/outputs/.gitkeep
 outputs/*
 !outputs/.gitkeep
+.fable
+.fable/
+fable/
 
 # 3. Python 字节码与缓存 (Python Cache)
 __pycache__/
