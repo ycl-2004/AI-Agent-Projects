@@ -1,4 +1,5 @@
 import json
+import progress
 from state import ResearchState
 from tools import (
     llm,
@@ -31,6 +32,11 @@ def planner_node(state: ResearchState) -> dict:
     topic = state["topic"]
     num_search = 3
 
+    progress.emit({
+        "type": "stage", "stage": "planner", "status": "start",
+        "message": None, "data": {"topic": topic},
+    }, quiet=True)
+
     prompt = f"""请针对研究主题：“{topic}” 进行深度拆解。
 生成 {num_search} 个具体、有深度且适合进一步检索的子问题。
 要求：每行输出一个子问题，不要带任何多余的寒暄或序号前缀。"""
@@ -43,9 +49,12 @@ def planner_node(state: ResearchState) -> dict:
         if line.strip()
     ][:num_search]
 
-    print(f"\n[Planner] 🎯 成功拆解出 {len(queries)} 个搜索子问题:")
-    for idx, q in enumerate(queries, 1):
-        print(f"  {idx}. {q}")
+    queries_text = "\n".join(f"  {idx}. {q}" for idx, q in enumerate(queries, 1))
+    progress.emit({
+        "type": "stage", "stage": "planner", "status": "done",
+        "message": f"[Planner] 🎯 成功拆解出 {len(queries)} 个搜索子问题:\n{queries_text}",
+        "data": {"queries": queries},
+    })
 
     return {"search_queries": queries}
 
@@ -60,8 +69,13 @@ def research_node(state: ResearchState) -> dict:
     """
     queries = state.get("search_queries", [])
     collected_notes = []
+    current_round = state.get("iteration_count", 0) + 1
 
-    print(f"\n[Research] 🔍 开始针对 {len(queries)} 个子问题展开多源检索与事实提取...")
+    progress.emit({
+        "type": "stage", "stage": "research", "status": "start",
+        "message": f"\n[Research] 🔍 开始针对 {len(queries)} 个子问题展开多源检索与事实提取...",
+        "data": {"round": current_round, "num_queries": len(queries), "queries": queries},
+    })
 
     for query in queries:
         prompt = f"""你是一个专业的高级行业与学术研究员。
@@ -89,6 +103,16 @@ def research_node(state: ResearchState) -> dict:
                         f"**提取的事实论据**:\n{raw_result}\n"
                     )
                     collected_notes.append(note_entry)
+                    progress.emit({
+                        "type": "note", "stage": "research",
+                        "message": None,
+                        "data": {
+                            "query": query,
+                            "source": tool_name,
+                            "round": current_round,
+                            "excerpt": str(raw_result)[:600],
+                        },
+                    }, quiet=True)
         else:
             note_entry = (
                 f"### 子问题调研: {query}\n"
@@ -96,10 +120,24 @@ def research_node(state: ResearchState) -> dict:
                 f"**事实论据**:\n{ai_msg.content}\n"
             )
             collected_notes.append(note_entry)
+            progress.emit({
+                "type": "note", "stage": "research",
+                "message": None,
+                "data": {
+                    "query": query,
+                    "source": "internal",
+                    "round": current_round,
+                    "excerpt": str(ai_msg.content)[:600],
+                },
+            }, quiet=True)
 
     current_iterations = state.get("iteration_count", 0) + 1
 
-    print(f"[Research] 收集完成！本轮新增 {len(collected_notes)} 条权威事实笔记 (当前累计迭代: {current_iterations} 轮)")
+    progress.emit({
+        "type": "stage", "stage": "research", "status": "done",
+        "message": f"[Research] 收集完成！本轮新增 {len(collected_notes)} 条权威事实笔记 (当前累计迭代: {current_iterations} 轮)",
+        "data": {"round": current_iterations, "new_notes": len(collected_notes)},
+    })
     return {
         "research_notes": collected_notes,
         "iteration_count": current_iterations,
@@ -121,11 +159,24 @@ def evaluate_node(state: ResearchState) -> dict:
     notes = state.get("research_notes", [])
     all_notes_text = "\n\n".join(notes)
 
-    print(f"\n[Evaluator] ⚖️ 正在质检当前累积的 {len(notes)} 条事实材料质量...")
+    progress.emit({
+        "type": "stage", "stage": "evaluator", "status": "start",
+        "message": f"\n[Evaluator] ⚖️ 正在质检当前累积的 {len(notes)} 条事实材料质量...",
+        "data": {"notes_count": len(notes)},
+    })
+
+    # 已达最大检索轮数时强制出稿：即使材料不完美，也必须基于现有笔记生成大纲，
+    # 避免硬熔断后带着空大纲进入人工审阅。
+    at_limit = state.get("iteration_count", 0) >= state.get("max_iterations", 2)
+    final_round_note = (
+        "\n注意：本轮已是最后一轮检索（已达轮数上限），无论材料是否完美，"
+        "都必须基于现有材料生成完整大纲，并将 is_sufficient 置为 true。\n"
+        if at_limit else ""
+    )
 
     eval_prompt = f"""你是一个严苛的研报主编兼事实质检员。
 当前研报核心主题：【{topic}】
-
+{final_round_note}
 以下是研究员目前收集到的所有事实笔记：
 {all_notes_text[:3000]}
 
@@ -165,7 +216,11 @@ def evaluate_node(state: ResearchState) -> dict:
 
     if is_sufficient:
         outline = eval_data.get("outline", "")
-        print(f"[Evaluator] ✅ 材料充分！已生成初版研报大纲:\n{outline[:150]}...\n")
+        progress.emit({
+            "type": "eval", "stage": "evaluator", "status": "done",
+            "message": f"[Evaluator] ✅ 材料充分！已生成初版研报大纲:\n{outline[:150]}...\n",
+            "data": {"is_sufficient": True, "outline": outline},
+        })
         return {
             "is_sufficient": True,
             "outline": outline,
@@ -173,7 +228,11 @@ def evaluate_node(state: ResearchState) -> dict:
         }
     else:
         new_queries = eval_data.get("missing_queries", [])
-        print(f"[Evaluator] ⚠️ 发现信息盲区，生成补充搜索问题: {new_queries}")
+        progress.emit({
+            "type": "eval", "stage": "evaluator", "status": "done",
+            "message": f"[Evaluator] ⚠️ 发现信息盲区，生成补充搜索问题: {new_queries}",
+            "data": {"is_sufficient": False, "missing_queries": new_queries},
+        })
         return {
             "is_sufficient": False,
             "search_queries": new_queries,
@@ -196,16 +255,28 @@ def should_continue_research(state: ResearchState) -> str:
 
     # 1. 硬熔断检查
     if iteration_count >= max_iterations:
-        print(f"\n[Research Router] 🛑 已达到最大允许检索轮数 ({iteration_count}/{max_iterations})，触发硬熔断保护，强制进入人工大纲审批！")
+        progress.emit({
+            "type": "route", "stage": "evaluator",
+            "message": f"\n[Research Router] 🛑 已达到最大允许检索轮数 ({iteration_count}/{max_iterations})，触发硬熔断保护，强制进入人工大纲审批！",
+            "data": {"decision": "go_to_review", "reason": "max_iterations"},
+        })
         return "go_to_review"
 
     # 2. 机器可读布尔状态检查
     if state.get("is_sufficient", False):
-        print("\n[Research Router] ✅ 事实材料充实，流向下一步人工大纲审批！")
+        progress.emit({
+            "type": "route", "stage": "evaluator",
+            "message": "\n[Research Router] ✅ 事实材料充实，流向下一步人工大纲审批！",
+            "data": {"decision": "go_to_review", "reason": "sufficient"},
+        })
         return "go_to_review"
 
     # 3. 触发反思自愈回路
-    print(f"\n[Research Router] 🔄 材料仍有欠缺，触发反思自愈回路，进入第 {iteration_count + 1} 轮补充检索！")
+    progress.emit({
+        "type": "route", "stage": "evaluator",
+        "message": f"\n[Research Router] 🔄 材料仍有欠缺，触发反思自愈回路，进入第 {iteration_count + 1} 轮补充检索！",
+        "data": {"decision": "go_to_research", "reason": "insufficient"},
+    })
     return "go_to_research"
 
 
@@ -229,7 +300,11 @@ def reviewer_node(state: ResearchState) -> dict:
     outline = state.get("outline", "暂无大纲")
     notes = state.get("research_notes", [])
 
-    print(f"\n[Reviewer] ⏸️ 触发 interrupt() 挂起，等待人工审核大纲...")
+    progress.emit({
+        "type": "stage", "stage": "reviewer", "status": "start",
+        "message": f"\n[Reviewer] ⏸️ 触发 interrupt() 挂起，等待人工审核大纲...",
+        "data": {"outline": outline, "topic": topic, "notes_count": len(notes)},
+    })
 
     human_resp = interrupt(
         f"【待审核研报大纲】 (主题: {topic}):\n\n"
@@ -239,7 +314,11 @@ def reviewer_node(state: ResearchState) -> dict:
         f"- 或输入具体的修改意见（例如：'增加关于推理成本与竞品对比的章节'）。"
     )
 
-    print(f"\n[Reviewer] 收到人类反馈: '{human_resp}'，正在由 LLM 深度解析并修订大纲...")
+    progress.emit({
+        "type": "stage", "stage": "reviewer", "status": "running",
+        "message": f"\n[Reviewer] 收到人类反馈: '{human_resp}'，正在由 LLM 深度解析并修订大纲...",
+        "data": {"feedback": str(human_resp)},
+    })
 
     prompt = f"""你是一个高级研报编辑部的沟通协调员兼大纲修订师。
 研究主题：【{topic}】
@@ -293,7 +372,11 @@ def reviewer_node(state: ResearchState) -> dict:
     revised_outline = review_data.get("revised_outline", outline)
     summary = review_data.get("review_summary", str(human_resp))
 
-    print(f"[Reviewer] 大纲处理完成 -> 审批状态: [{status}] | 意见摘要: {summary}")
+    progress.emit({
+        "type": "stage", "stage": "reviewer", "status": "done",
+        "message": f"[Reviewer] 大纲处理完成 -> 审批状态: [{status}] | 意见摘要: {summary}",
+        "data": {"review_status": status, "outline": revised_outline, "summary": summary},
+    })
 
     return {
         "outline": revised_outline,
@@ -314,10 +397,18 @@ def should_continue_after_review(state: ResearchState) -> str:
     status = state.get("review_status", "")
 
     if status == "approved":
-        print("\n[Review Router] ✅ 大纲审核通过，正式进入长篇撰写阶段！")
+        progress.emit({
+            "type": "route", "stage": "reviewer",
+            "message": "\n[Review Router] ✅ 大纲审核通过，正式进入长篇撰写阶段！",
+            "data": {"decision": "go_to_writer"},
+        })
         return "go_to_writer"
 
-    print("\n[Review Router] 🔄 Reviewer 要求重大修改，将新大纲重新提交人工确认！")
+    progress.emit({
+        "type": "route", "stage": "reviewer",
+        "message": "\n[Review Router] 🔄 Reviewer 要求重大修改，将新大纲重新提交人工确认！",
+        "data": {"decision": "go_to_review"},
+    })
     return "go_to_review"
 
 
@@ -327,6 +418,7 @@ def should_continue_after_review(state: ResearchState) -> str:
 def writer_node(state: ResearchState) -> dict:
     """
     长篇撰写节点：根据通过的 Outline、Research Notes、Topic 和 Human Feedback 撰写完整报告。
+    使用 llm.stream() 逐段产出正文，并通过 progress 事件总线向前端实时流式推送。
     """
     topic = state["topic"]
     outline = state.get("outline", "")
@@ -334,7 +426,11 @@ def writer_node(state: ResearchState) -> dict:
     feedback = state.get("human_feedback", "")
     all_notes_text = "\n\n".join(notes)
 
-    print(f"\n[Writer] ✍️ 正在根据大纲与事实论据撰写长篇深度研究报告...")
+    progress.emit({
+        "type": "stage", "stage": "writer", "status": "start",
+        "message": f"\n[Writer] ✍️ 正在根据大纲与事实论据撰写长篇深度研究报告...",
+        "data": {"topic": topic},
+    })
 
     prompt = f"""你是一个资深的行业首席分析师与科技作家。
 请根据以下经过审核的【研报大纲】以及【一手调研事实笔记】，为主题【{topic}】撰写一篇结构严谨、论据详实、排版优雅的长篇深度研究报告。
@@ -363,11 +459,36 @@ def writer_node(state: ResearchState) -> dict:
 4. 直接输出最终的完整 Markdown 格式正文，不要包含任何多余的开场白或自我介绍。
 """
 
-    response = llm.invoke(prompt)
-    print(f"[Writer] ✅ 研报撰写完成！正文总字数: {len(response.content)} 字符")
+    chunks = []
+    for token in llm.stream(prompt):
+        delta = token.content
+        if not delta:
+            continue
+        chunks.append(delta)
+        progress.emit({
+            "type": "chunk", "stage": "writer",
+            "message": None,
+            "data": {"delta": delta},
+        }, quiet=True)
+
+    report = "".join(chunks).strip()
+
+    # 剥掉模型偶尔给整份报告包裹的 markdown 代码围栏 (```markdown ... ```)
+    if report.startswith("```") and report.endswith("```"):
+        first_newline = report.find("\n")
+        if first_newline != -1:
+            report = report[first_newline + 1:].rstrip()
+            if report.endswith("```"):
+                report = report[:-3].rstrip()
+
+    progress.emit({
+        "type": "stage", "stage": "writer", "status": "done",
+        "message": f"[Writer] ✅ 研报撰写完成！正文总字数: {len(report)} 字符",
+        "data": {"chars": len(report)},
+    })
 
     return {
-        "report_content": response.content
+        "report_content": report
     }
 
 
@@ -381,12 +502,23 @@ def exporter_node(state: ResearchState) -> dict:
     topic = state["topic"]
     content = state.get("report_content", "")
 
+    progress.emit({
+        "type": "stage", "stage": "exporter", "status": "start",
+        "message": f"\n[Exporter] 💾 正在将研报落地保存为本地文件...",
+        "data": {},
+    })
+
     # 生成安全文件名
     safe_filename = "".join([c if c.isalnum() or c in "_- " else "_" for c in topic]).strip().replace(" ", "_")
     filename = f"{safe_filename}_deep_research.md"
 
-    print(f"\n[Exporter] 💾 正在将研报落地保存为本地文件...")
     filepath = save_markdown_report.invoke({"content": content, "filename": filename})
+
+    progress.emit({
+        "type": "stage", "stage": "exporter", "status": "done",
+        "message": None,
+        "data": {"filepath": filepath},
+    }, quiet=True)
 
     return {
         "output_filepath": filepath

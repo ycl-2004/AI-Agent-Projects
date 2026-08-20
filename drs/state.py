@@ -34,3 +34,21 @@ class ResearchState(TypedDict):
     # -------------------------
     report_content: str                                # 最终生成的长篇 Markdown 研报正文
     output_filepath: str                               # 实体报告落盘路径
+
+
+def initial_state(topic: str) -> dict:
+    """构造一次全新调研的完整初始状态 (CLI 与 frontend/server.py 共用)。"""
+    return {
+        "topic": topic,
+        "search_queries": [],
+        "research_notes": [],
+        "iteration_count": 0,
+        "max_iterations": 2,
+        "is_sufficient": False,
+        "evaluator_feedback": "",
+        "outline": "",
+        "human_feedback": "",
+        "review_status": "",
+        "report_content": "",
+        "output_filepath": "",
+    }

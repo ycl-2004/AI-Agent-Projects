@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DRS · 深度调研系统</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/vendor/marked.min.js" defer></script>
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div>
+
+<header class="topbar">
+  <a class="brand" href="#" id="brandHome">DRS<span class="brand-sep">·</span><span class="brand-sub">Deep Research System</span></a>
+  <div class="topbar-meta mono">LangGraph · arXiv / Wikipedia / Web</div>
+</header>
+
+<main id="app">
+
+  <!-- ================= VIEW 1 · HOME ================= -->
+  <section id="view-home" class="view view-active">
+    <div class="hero">
+      <p class="eyebrow mono">Deep Research &amp; Report System</p>
+      <h1 class="hero-title">从一个主题，<br>到一份真材实料的研报</h1>
+      <p class="hero-sub">编辑部式流水线：自主拆解意图、三源真实检索、事实质检反思，经你审阅大纲后，交付长篇 Markdown 研报。</p>
+
+      <div class="composer">
+        <input id="topicInput" type="text" maxlength="120" placeholder="输入你想深度调研的主题…" autocomplete="off" autofocus>
+        <button id="startBtn" class="btn btn-primary">开始调研</button>
+      </div>
+      <p class="composer-hint" id="composerHint" role="alert"></p>
+
+      <div class="chips">
+        <button class="chip">DeepSeek-V3 架构创新与 MoE 机制</button>
+        <button class="chip">英伟达 Blackwell 与 NVLink 互联技术</button>
+        <button class="chip">2026 具身智能多模态大模型落地现状</button>
+      </div>
+
+      <button id="resumePill" class="resume-pill mono hidden">继续进行中的调研 →</button>
+    </div>
+
+    <section class="pipeline-map">
+      <div class="pm-head">
+        <h2 class="pm-title">编辑部流水线</h2>
+        <span class="pm-note mono">6 nodes · 2 conditional edges · HITL</span>
+      </div>
+      <ol class="pm-steps">
+        <li><span class="pm-idx mono">01</span><span class="pm-name">意图拆解</span><span class="pm-desc">主题拆为 3 个子问题</span></li>
+        <li><span class="pm-idx mono">02</span><span class="pm-name">多源检索</span><span class="pm-desc">arXiv / Wikipedia / Web</span></li>
+        <li><span class="pm-idx mono">03</span><span class="pm-name">事实质检</span><span class="pm-desc">盲区反思 · 自愈回路</span></li>
+        <li><span class="pm-idx mono">04</span><span class="pm-name">主编审阅</span><span class="pm-desc">interrupt · 你来把关</span></li>
+        <li><span class="pm-idx mono">05</span><span class="pm-name">研报撰写</span><span class="pm-desc">依大纲与事实写长文</span></li>
+        <li><span class="pm-idx mono">06</span><span class="pm-name">落盘导出</span><span class="pm-desc">Markdown 持久化</span></li>
+      </ol>
+    </section>
+
+    <footer class="home-footer mono">100% 真实 API 检索 · 人工大纲终审 · 研报落盘 outputs/</footer>
+  </section>
+
+  <!-- ================= VIEW 2 · PIPELINE ================= -->
+  <section id="view-pipeline" class="view">
+    <div class="run-header">
+      <button id="backBtn" class="btn btn-ghost btn-sm">← 新的主题</button>
+      <h2 class="run-topic" id="runTopic"></h2>
+      <span class="status-badge" id="runStatus"><span class="status-dot"></span><span id="runStatusText">准备中</span></span>
+    </div>
+
+    <div class="stepper" id="stepper"></div>
+
+    <div class="run-body" id="runBody">
+      <div class="feed-col">
+        <div class="feed" id="feed"></div>
+      </div>
+      <aside class="meta-col">
+        <div class="meta-card mono">
+          <div class="meta-row"><span class="meta-label">SESSION</span><span id="metaSession">—</span></div>
+          <div class="meta-row"><span class="meta-label">检索轮次</span><span id="metaRound">0 / 2</span></div>
+          <div class="meta-row"><span class="meta-label">事实笔记</span><span id="metaNotes">0 条</span></div>
+          <div class="meta-row"><span class="meta-label">arXiv</span><span id="metaArxiv">0</span></div>
+          <div class="meta-row"><span class="meta-label">Wikipedia</span><span id="metaWiki">0</span></div>
+          <div class="meta-row"><span class="meta-label">Web</span><span id="metaWeb">0</span></div>
+          <div class="meta-row"><span class="meta-label">已用时</span><span id="metaElapsed">00:00</span></div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- HITL 人工审阅闸门 -->
+    <div class="review hidden" id="reviewPanel">
+      <div class="review-doc">
+        <div class="review-doc-stamp" aria-hidden="true">审</div>
+        <header class="review-doc-head">
+          <div>
+            <p class="review-eyebrow mono">OUTLINE · 主编审阅</p>
+            <h3 class="review-topic" id="reviewTopic"></h3>
+          </div>
+          <div class="review-doc-meta mono" id="reviewMeta"></div>
+        </header>
+        <div class="doc-body prose prose-outline" id="outlineBody"></div>
+      </div>
+      <div class="review-actions">
+        <label class="review-label" for="feedbackInput">审阅意见</label>
+        <textarea id="feedbackInput" rows="3" placeholder="可直接通过；或写下修改意见，例如：增加与 Llama 4 的对比章节，压缩历史沿革部分"></textarea>
+        <div class="review-buttons">
+          <button id="approveBtn" class="btn btn-primary">通过 · 开始撰写</button>
+          <button id="feedbackBtn" class="btn btn-secondary">按意见修订大纲</button>
+        </div>
+        <p class="review-hint mono">通过 = 进入长文撰写 · 修订 = 大纲按你的意见重做并再次送审</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= VIEW 3 · REPORT ================= -->
+  <section id="view-report" class="view">
+    <div class="report-wrap">
+      <div class="report-header">
+        <p class="report-eyebrow mono" id="reportEyebrow">FINAL REPORT</p>
+        <h2 class="report-title" id="reportTitle"></h2>
+        <p class="report-meta mono" id="reportMeta"></p>
+        <div class="report-actions hidden" id="reportActions">
+          <button id="downloadBtn" class="btn btn-secondary btn-sm">下载 .md</button>
+          <button id="copyBtn" class="btn btn-secondary btn-sm">复制全文</button>
+          <button id="newBtn" class="btn btn-primary btn-sm">新的调研</button>
+        </div>
+      </div>
+      <div class="report-writing mono hidden" id="writingBanner"><span class="writing-dot"></span>正在撰写研报 · 边写边呈现</div>
+      <article class="prose prose-report" id="reportBody"></article>
+    </div>
+  </section>
+
+</main>
+</body>
+</html>

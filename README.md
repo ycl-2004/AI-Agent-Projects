@@ -26,8 +26,8 @@
 | 编号 | 项目目录 | 项目全称 | 核心技术栈 | 架构拓扑亮点 | 状态 |
 |:---:|:---|:---|:---|:---|:---:|
 | **01** | [`drs/`](drs/README.md) | **Deep Research & Report System** | LangGraph + arXiv API + Wikipedia API + Web Search | • 意图拆解与多源真实检索<br>• 事实主编质检与反思自愈回路<br>• HITL 自然语言大纲终审与修订<br>• 3000+ 字长篇技术研报自动撰写与落盘 | ✅ **已就绪** |
-| **02** | `planning...` | **Multi-Agent Code Review & Refactor Suite** | LangGraph + MCP + Tree-sitter | 规划中：静态分析、架构审查、自动测试与修复建议的协同智能体 | 🚧 规划中 |
-| **03** | `planning...` | **Enterprise RAG & Hybrid Knowledge Graph** | LangGraph + Hybrid Search + Milvus / Neo4j | 规划中：自适应检索路由、GraphRAG 实体抽取与多跳推理 | 🚧 规划中 |
+| **02** | [`ota/`](ota/README.md) | **Omni-channel Ticket & Customer Service AI Agent** | LangChain LCEL + Pydantic v2 + Tool Calling | • LCEL 预处理传送带 (Parallel/Passthrough/Lambda)<br>• 财务赔付核算与物流追踪工具闭环<br>• Pydantic 结构化质检与自愈重试<br>• 多模式执行 (invoke/batch/stream) | ✅ **已就绪** |
+| **03** | `planning...` | **Enterprise Multi-Agent Code Review & Refactor Suite** | LangGraph + MCP + Tree-sitter | 规划中：静态分析、架构审查、自动测试与修复建议的协同智能体 | 🚧 规划中 |
 
 ---
 
